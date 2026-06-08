@@ -25,6 +25,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/ai_auction
       - AGNES_API_KEY=sk-bchEYgDebbqGGcqupTB1ccQ6eoo4D8MOcL6MnmAIeQFXDLU3
+      - LANGFUSE_PUBLIC_KEY=pk-lf-10f5bad9-ae41-4b7b-b270-5dac75a97bb1
+      - LANGFUSE_SECRET_KEY=sk-lf-df6614e8-c25d-409c-bc23-00f1167bd962
+      - LANGFUSE_BASE_URL=https://cloud.langfuse.com
     depends_on:
       postgres:
         condition: service_healthy

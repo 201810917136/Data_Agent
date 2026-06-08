@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import httpx
-from config import AGNES_API_KEY, AGNES_BASE_URL
+from config import AGNES_API_KEY, AGNES_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
 from datetime import datetime, timezone
+
 
 async def call_llm(system_prompt: str, user_question: str, trace_id: str = None) -> str:
     headers = {
@@ -31,18 +32,24 @@ async def call_llm(system_prompt: str, user_question: str, trace_id: str = None)
             # 记录 Langfuse trace
             try:
                 from langfuse import Langfuse
-                langfuse = Langfuse()
+                from langfuse.types import TraceContext
+                langfuse = Langfuse(
+                    public_key=LANGFUSE_PUBLIC_KEY,
+                    secret_key=LANGFUSE_SECRET_KEY,
+                    host=LANGFUSE_BASE_URL,
+                )
                 if trace_id:
-                    langfuse.trace(id=trace_id).generation(
+                    tc = TraceContext(trace_id=trace_id)
+                    gen = langfuse.start_generation(
+                        trace_context=tc,
                         name='agnes-1.5-flash',
                         input={'system': system_prompt, 'user': user_question},
                         output=content,
                         metadata={'model': 'agnes-1.5-flash'},
-                        usage={
-                            'inputTokens': len(system_prompt) // 4,
-                            'outputTokens': len(content) // 4,
-                        },
+                        usage_details={'inputTokens': len(system_prompt) // 4, 'outputTokens': len(content) // 4},
                     )
+                    gen.end()
+                    langfuse.flush()
             except Exception:
                 pass
             return content
@@ -50,14 +57,23 @@ async def call_llm(system_prompt: str, user_question: str, trace_id: str = None)
         end_time = datetime.now(timezone.utc)
         try:
             from langfuse import Langfuse
-            langfuse = Langfuse()
+            from langfuse.types import TraceContext
+            langfuse = Langfuse(
+                public_key=LANGFUSE_PUBLIC_KEY,
+                secret_key=LANGFUSE_SECRET_KEY,
+                host=LANGFUSE_BASE_URL,
+            )
             if trace_id:
-                langfuse.trace(id=trace_id).generation(
+                tc = TraceContext(trace_id=trace_id)
+                gen = langfuse.start_generation(
+                    trace_context=tc,
                     name='agnes-1.5-flash',
                     input={'system': system_prompt, 'user': user_question},
                     output=None,
                     status_message=str(e),
                 )
+                gen.end()
+                langfuse.flush()
         except Exception:
             pass
         raise
