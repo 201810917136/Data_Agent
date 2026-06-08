@@ -1,6 +1,6 @@
 ﻿import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { sendMessage, sendPreview, sendExecute } from '../api'
+import { sendMessage, apiSendPreview, apiSendExecute } from '../api'
 
 export interface Message {
   id: string
@@ -35,7 +35,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push(assistantMsg)
 
     try {
-      const result = await sendPreview(question, sessionId.value)
+      const result = await apiSendPreview(question, sessionId.value)
       assistantMsg.loading = false
       assistantMsg.questionUnderstanding = result.question_understanding
       assistantMsg.tablesInvolved = result.tables_involved
@@ -63,7 +63,7 @@ export const useChatStore = defineStore('chat', () => {
     lastMsg.tempSql = undefined
     lastMsg.editing = false
     try {
-      const result = await sendExecute(question, sql, sessionId.value)
+      const result = await apiSendExecute(question, sql, sessionId.value)
       if (result.success) {
         lastMsg.content = '查询成功'
         lastMsg.sql = result.sql
@@ -81,7 +81,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function sendQuestion(question: string) {
-    await sendPreview(question)
+    await apiSendPreview(question)
   }
 
   return { messages, sendQuestion, sendPreview, sendExecute, sessionId }
