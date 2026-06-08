@@ -29,27 +29,23 @@ async def call_llm(system_prompt: str, user_question: str, trace_id: str = None)
             data = response.json()
             content = data['choices'][0]['message']['content']
             end_time = datetime.now(timezone.utc)
-            # 记录 Langfuse trace
+            # 璁板綍 Langfuse trace
             try:
                 from langfuse import Langfuse
-                from langfuse.types import TraceContext
-                langfuse = Langfuse(
+                lf = Langfuse(
                     public_key=LANGFUSE_PUBLIC_KEY,
                     secret_key=LANGFUSE_SECRET_KEY,
                     host=LANGFUSE_BASE_URL,
                 )
-                if trace_id:
-                    tc = TraceContext(trace_id=trace_id)
-                    gen = langfuse.start_generation(
-                        trace_context=tc,
-                        name='agnes-1.5-flash',
-                        input={'system': system_prompt, 'user': user_question},
-                        output=content,
-                        metadata={'model': 'agnes-1.5-flash'},
-                        usage_details={'inputTokens': len(system_prompt) // 4, 'outputTokens': len(content) // 4},
-                    )
-                    gen.end()
-                    langfuse.flush()
+                obs = lf.start_observation(
+                    name='agnes-1.5-flash',
+                    as_type='generation',
+                    input={'system': system_prompt, 'user': user_question},
+                    output=content,
+                    metadata={'model': 'agnes-1.5-flash'},
+                )
+                obs.end()
+                lf.flush()
             except Exception:
                 pass
             return content
@@ -57,23 +53,20 @@ async def call_llm(system_prompt: str, user_question: str, trace_id: str = None)
         end_time = datetime.now(timezone.utc)
         try:
             from langfuse import Langfuse
-            from langfuse.types import TraceContext
-            langfuse = Langfuse(
+            lf = Langfuse(
                 public_key=LANGFUSE_PUBLIC_KEY,
                 secret_key=LANGFUSE_SECRET_KEY,
                 host=LANGFUSE_BASE_URL,
             )
-            if trace_id:
-                tc = TraceContext(trace_id=trace_id)
-                gen = langfuse.start_generation(
-                    trace_context=tc,
-                    name='agnes-1.5-flash',
-                    input={'system': system_prompt, 'user': user_question},
-                    output=None,
-                    status_message=str(e),
-                )
-                gen.end()
-                langfuse.flush()
+            obs = lf.start_observation(
+                name='agnes-1.5-flash',
+                as_type='generation',
+                input={'system': system_prompt, 'user': user_question},
+                output=None,
+                status_message=str(e),
+            )
+            obs.end()
+            lf.flush()
         except Exception:
             pass
         raise

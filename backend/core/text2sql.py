@@ -11,39 +11,47 @@ def build_schema_context(db: Session) -> str:
     tables = db.query(SqlSchemaMetadata).filter(
         SqlSchemaMetadata.layer.in_(["DWS", "ADS", "DIM"])
     ).all()
-    context = ""
-    current_table = ""
+    # 只输出精简表结构，不要完整 CREATE TABLE
+    result = []
+    current_table = None
     for t in tables:
         if t.table_name != current_table:
             if current_table:
-                context += ")" + NL
-            ctx_name = t.table_comment or t.table_name
-            context += "-- " + ctx_name + NL + "CREATE TABLE " + t.table_name + "(" + NL
+                result.append(chr(10))
+            # 输出表名和业务术语
+            comment = t.table_comment or t.table_name
+            terms = ", ".join(t.business_terms) if t.business_terms else ""
+            result.append("-- " + comment)
+            result.append("  表: " + t.table_name)
+            if terms:
+                result.append("  业务术语: " + terms)
+            result.append("  字段:")
             current_table = t.table_name
-        comment = t.column_comment or ""
-        terms = ", ".join(t.business_terms) if t.business_terms else ""
-        note = " -- " + comment
-        if terms:
-            note += " (业务术语: " + terms + ")"
-        context += "    " + t.column_name + note + NL
-    if current_table:
-        context += ")" + NL
-    return context
+        # 输出字段名和注释
+        col_comment = t.column_comment or ""
+        col_terms = ", ".join(t.business_terms) if t.business_terms else ""
+        col_info = t.column_name
+        if col_comment:
+            col_info += " -- " + col_comment
+        if col_terms:
+            col_info += " (术语: " + col_terms + ")"
+        result.append("    " + col_info)
+    return chr(10).join(result)
 
 
 def _build_explanation_system_prompt(schema_context: str) -> str:
     return (
-        "你是二手车拍卖数据仓库的查询助手。请按照以下结构回答：" + NL
-        + NL
-        + "1. [问题理解]用一句话解释你对用户问题的理解" + NL
-        + "2. [涉及表]列出会用到的数据表及其作用" + NL
-        + "3. [查询逻辑]说明查询思路" + NL
-        + "4. [生成的SQL]用 triple-backtick-sql 包裹最终 SQL" + NL
-        + NL
-        + "相关表结构：" + NL
-        + schema_context + NL
-        + NL
-        + "注意：优先使用 ADS/DWS 聚合层" + NL
+        "你是二手车拍卖数据仓库的查询助手。请按照以下结构回答：" + chr(10)
+        + chr(10)
+        + "1. [问题理解]用一句话解释你对用户问题的理解" + chr(10)
+        + "2. [涉及表]列出会用到的数据表及其作用" + chr(10)
+        + "3. [查询逻辑]说明查询思路" + chr(10)
+        + "4. [生成的SQL]用 triple-backtick-sql 包裹最终 SQL" + chr(10)
+        + chr(10)
+        + "相关表结构：" + chr(10)
+        + schema_context + chr(10)
+        + chr(10)
+        + "注意：优先使用 ADS/DWS 聚合层" + chr(10)
         + "- SQL 必须是可执行的 PostgreSQL 语句"
     )
 
@@ -88,7 +96,7 @@ def detect_chart_type(data: list) -> str:
 
 
 async def preview_query(user_question: str, db: Session) -> dict:
-    trace_id = str(uuid.uuid4())[:8]
+    trace_id = str(uuid.uuid4())
     schema_context = build_schema_context(db)
     system_prompt = _build_explanation_system_prompt(schema_context)
     parsed = None
@@ -123,7 +131,7 @@ async def preview_query(user_question: str, db: Session) -> dict:
 
 
 async def execute_query(user_question: str, sql: str, db: Session) -> dict:
-    trace_id = str(uuid.uuid4())[:8]
+    trace_id = str(uuid.uuid4())
     validation = validate_sql(sql, db)
     if not validation.success:
         return {"success": False, "error": validation.error, "sql": sql, "trace_id": trace_id}
