@@ -7,36 +7,81 @@ import re
 import uuid
 
 
-def build_schema_context(db: Session) -> str:
+def _keyword_match(user_question: str, db: Session) -> dict:
+    """根据用户问题关键词匹配相关表和术语映射"""
+    q = user_question.lower()
+    matching_tables = set()
+    term_mapping = {}
+    
+    # 业务术语 -> 表 的映射
+    keywords = [
+        ('门店', 'dim_stores', 'dws_ucar_store_aution_1d'),
+        ('销售额', 'dws_ucar_store_aution_1d'),
+        ('GMV', 'dws_ucar_store_aution_1d'),
+        ('销量', 'dws_ucar_store_aution_1d'),
+        ('拍卖', 'dws_ucar_store_aution_1d', 'dws_ucar_auction_stores_1m'),
+        ('上拍', 'dws_ucar_store_aution_1d'),
+        ('成交', 'dws_ucar_store_aution_1d'),
+        ('流拍', 'dws_ucar_store_aution_1d'),
+        ('品牌', 'dim_stores'),
+        ('地区', 'dim_areas'),
+        ('省份', 'dim_areas'),
+        ('城市', 'dim_areas'),
+        ('员工', 'dim_employees'),
+        ('角色', 'dim_employees'),
+        ('订单', 'dwd_ucar_auction_orders_di'),
+        ('明细', 'dwd_ucar_auction_orders_di'),
+    ]
+    
+    for kw in keywords:
+        if kw[0] in q:
+            for t in kw[1:]:
+                matching_tables.add(t)
+            # 构建术语映射
+            term_mapping[kw[0]] = kw[1:]
+    
+    # 默认至少包含维度表
+    if not matching_tables:
+        matching_tables = {'dim_stores', 'dws_ucar_store_aution_1d'}
+    
+    return {'tables': matching_tables, 'term_mapping': term_mapping}
+
+
+def build_schema_context(db: Session, user_question: str) -> str:
+    """"Build compact schema metadata from database."""
     tables = db.query(SqlSchemaMetadata).filter(
         SqlSchemaMetadata.layer.in_(["DWS", "ADS", "DIM"])
     ).all()
-    # 只输出精简表结构，不要完整 CREATE TABLE
-    result = []
+
+    if not tables:
+        return "(No schema metadata)"
+
+    out = []
+    out.append("数据仓库元数据")
+    out.append("----" * 20)
+    out.append("")
+
     current_table = None
     for t in tables:
         if t.table_name != current_table:
             if current_table:
-                result.append(chr(10))
-            # 输出表名和业务术语
-            comment = t.table_comment or t.table_name
-            terms = ", ".join(t.business_terms) if t.business_terms else ""
-            result.append("-- " + comment)
-            result.append("  表: " + t.table_name)
-            if terms:
-                result.append("  业务术语: " + terms)
-            result.append("  字段:")
+                out.append("")
+            hdr = "## " + t.table_name
+            out.append(hdr)
+            if t.table_comment and t.table_comment != t.table_name:
+                out.append("    注释: " + t.table_comment)
+            if t.business_terms:
+                out.append("    术语: " + ", ".join(t.business_terms))
+            out.append("    字段:")
             current_table = t.table_name
-        # 输出字段名和注释
-        col_comment = t.column_comment or ""
-        col_terms = ", ".join(t.business_terms) if t.business_terms else ""
-        col_info = t.column_name
-        if col_comment:
-            col_info += " -- " + col_comment
-        if col_terms:
-            col_info += " (术语: " + col_terms + ")"
-        result.append("    " + col_info)
-    return chr(10).join(result)
+        col = "      " + t.column_name
+        if t.column_comment:
+            col += " (" + t.column_comment + ")"
+        if t.business_terms:
+            col += " [术语: " + ", ".join(t.business_terms) + "]"
+        out.append(col)
+
+    return chr(10).join(out)
 
 
 def _build_explanation_system_prompt(schema_context: str) -> str:
@@ -48,17 +93,15 @@ def _build_explanation_system_prompt(schema_context: str) -> str:
         + "3. [查询逻辑]说明查询思路" + chr(10)
         + "4. [生成的SQL]用 triple-backtick-sql 包裹最终 SQL" + chr(10)
         + chr(10)
-        + "相关表结构：" + chr(10)
+        + "相关元数据：" + chr(10)
         + schema_context + chr(10)
         + chr(10)
         + "注意：优先使用 ADS/DWS 聚合层" + chr(10)
         + "- SQL 必须是可执行的 PostgreSQL 语句"
     )
-
-
 def extract_sql(response: str) -> str:
     BT3 = chr(96) * 3
-    match = re.search(BT3 + r"sql\\s*(.*?)\\s*" + BT3, response, re.DOTALL | re.IGNORECASE)
+    match = re.search(BT3 + r"sql\s*(.*?)\s*" + BT3, response, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
     return response.strip()
@@ -97,7 +140,16 @@ def detect_chart_type(data: list) -> str:
 
 async def preview_query(user_question: str, db: Session) -> dict:
     trace_id = str(uuid.uuid4())
-    schema_context = build_schema_context(db)
+    matched = _keyword_match(user_question, db)
+    schema_context = build_schema_context(db, user_question)
+    # 在 prompt 中注入关键词->术语映射
+    if matched['term_mapping']:
+        term_lines = []
+        for kw, tables in matched['term_mapping'].items():
+            term_lines.append(f"    - " + kw + " -> " + ", ".join(tables))
+        schema_context = "业务术语映射：\n" + "\n".join(term_lines) + "\n\n" + schema_context
+    else:
+        schema_context = "当前未匹配到明确业务术语。\n\n" + schema_context
     system_prompt = _build_explanation_system_prompt(schema_context)
     parsed = None
     sql = None
@@ -177,6 +229,7 @@ def _parse_explanation_response(response: str) -> dict:
         ("query_logic", "[查询逻辑]"),
     ]:
         if marker in response:
+            idx = response.index(marker)
             after = response[idx + len(marker):]
             next_markers = ["[涉及表]", "[查询逻辑]", "[生成的SQL]"]
             next_idx = len(after)
