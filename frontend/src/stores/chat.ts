@@ -1,6 +1,6 @@
-import { defineStore } from 'pinia'
+﻿import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { sendMessage } from '../api'
+import { sendMessage, sendPreview, sendExecute } from '../api'
 
 export interface Message {
   id: string
@@ -11,31 +11,43 @@ export interface Message {
   chartType?: string
   error?: string
   loading?: boolean
+  isPreview?: boolean
+  questionUnderstanding?: string
+  tablesInvolved?: string
+  queryLogic?: string
+  sqlValid?: boolean
+  editing?: boolean
+  tempSql?: string
 }
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([])
   const sessionId = ref(crypto.randomUUID())
 
-  async function sendQuestion(question: string) {
+  async function sendPreview(question: string) {
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: question }
     messages.value.push(userMsg)
 
-    const assistantMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: '', loading: true }
+    const assistantMsg: Message = {
+      id: crypto.randomUUID(), role: 'assistant',
+      content: '', loading: true, isPreview: true
+    }
     messages.value.push(assistantMsg)
 
     try {
-      const result = await sendMessage(question, sessionId.value)
+      const result = await sendPreview(question, sessionId.value)
       assistantMsg.loading = false
-      if (result.success) {
-        assistantMsg.content = '查询成功'
-        assistantMsg.sql = result.sql
-        assistantMsg.data = result.data
-        assistantMsg.chartType = result.chart_type
+      assistantMsg.questionUnderstanding = result.question_understanding
+      assistantMsg.tablesInvolved = result.tables_involved
+      assistantMsg.queryLogic = result.query_logic
+      assistantMsg.sql = result.sql
+      assistantMsg.sqlValid = result.sql_valid
+      assistantMsg.error = result.error
+      assistantMsg.isPreview = true
+      if (result.error) {
+        assistantMsg.content = 'SQL 校验未通过'
       } else {
-        assistantMsg.content = '查询失败'
-        assistantMsg.error = result.error
-        assistantMsg.sql = result.sql
+        assistantMsg.content = '已生成 SQL，请确认'
       }
     } catch (e: any) {
       assistantMsg.loading = false
@@ -44,5 +56,33 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { messages, sendQuestion }
+  async function sendExecute(question: string, sql: string) {
+    const lastMsg = messages.value[messages.value.length - 1]
+    lastMsg.loading = false
+    lastMsg.isPreview = false
+    lastMsg.tempSql = undefined
+    lastMsg.editing = false
+    try {
+      const result = await sendExecute(question, sql, sessionId.value)
+      if (result.success) {
+        lastMsg.content = '查询成功'
+        lastMsg.sql = result.sql
+        lastMsg.data = result.data
+        lastMsg.chartType = result.chart_type
+      } else {
+        lastMsg.content = '查询失败'
+        lastMsg.error = result.error
+        lastMsg.sql = result.sql
+      }
+    } catch (e: any) {
+      lastMsg.content = '请求异常'
+      lastMsg.error = e.message
+    }
+  }
+
+  async function sendQuestion(question: string) {
+    await sendPreview(question)
+  }
+
+  return { messages, sendQuestion, sendPreview, sendExecute, sessionId }
 })
